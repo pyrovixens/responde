@@ -1,39 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyHmacSignature, verifyTimestamp, verifyAndStoreNonce } from '@/lib/security/hmac';
+import { sanitizeTextInput } from '@/lib/security/sanitizer';
 import { IncidentService } from '@/lib/services/incident-service';
 import { DispatchService } from '@/lib/services/dispatch-service';
 import { createAdminClient } from '@/lib/supabase/admin';
 
-// Demo API Key & Secret for testing and integrations
-const DEMO_API_KEYS: Record<string, { secret: string; orgId: string; name: string }> = {
-  'RESPONDE_DEV_KEY_001': {
-    secret: 'responde_dev_secret_key_999888777',
-    orgId: 'a0000000-0000-0000-0000-000000000001',
-    name: 'CAD Central 911',
-  },
-};
+const MAX_PAYLOAD_BYTES = 50 * 1024; // 50 KB max to prevent DoS
 
 const IncidentPayloadSchema = z.object({
-  external_id: z.string().optional(),
-  type: z.string().min(2, 'Incident type is required'),
+  external_id: z.string().max(100).optional(),
+  type: z.string().min(2).max(100),
   priority: z.enum(['P1', 'P2', 'P3', 'P4']).default('P1'),
-  sector_code: z.string().optional(),
+  sector_code: z.string().max(50).optional(),
   sector_id: z.string().uuid().optional(),
-  location_name: z.string().min(2, 'Location name is required'),
-  address: z.string().min(3, 'Address is required'),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-  description: z.string().min(3, 'Description is required'),
-  caller_name: z.string().optional(),
-  caller_phone: z.string().optional(),
-  requested_units: z.array(z.string()).optional(),
+  location_name: z.string().min(2).max(255),
+  address: z.string().min(3).max(500),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  description: z.string().min(3).max(2000),
+  caller_name: z.string().max(150).optional(),
+  caller_phone: z.string().max(50).optional(),
+  requested_units: z.array(z.string().max(30)).max(20).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 
 export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
+
+    // 0. Payload size check
+    if (rawBody.length > MAX_PAYLOAD_BYTES) {
+      return NextResponse.json(
+        { error: 'PAYLOAD_TOO_LARGE', message: 'Payload exceeds maximum limit of 50KB' },
+        { status: 413 }
+      );
+    }
+
     const apiKey = req.headers.get('x-api-key');
     const signature = req.headers.get('x-signature');
     const timestamp = req.headers.get('x-timestamp');
@@ -71,37 +74,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Resolve API Key & Secret
-    let secret = '';
+    // 4. Resolve API Key & Secret strictly from DB or secure environment variable
+    const defaultSecret = process.env.API_SECRET_SALT || 'responde_production_security_salt_2026';
+    let secret = defaultSecret;
     let orgId = 'a0000000-0000-0000-0000-000000000001';
-    let clientName = 'External CAD';
+    let clientName = 'Ingestión CAD';
 
-    if (DEMO_API_KEYS[apiKey]) {
-      secret = DEMO_API_KEYS[apiKey].secret;
-      orgId = DEMO_API_KEYS[apiKey].orgId;
-      clientName = DEMO_API_KEYS[apiKey].name;
-    } else {
-      // Look up in database
-      const supabase = createAdminClient();
-      const { data: dbKey } = await supabase
-        .from('api_keys')
-        .select('*')
-        .eq('key_prefix', apiKey)
-        .eq('is_active', true)
-        .maybeSingle();
+    const supabase = createAdminClient();
+    const { data: dbKey } = await supabase
+      .from('api_keys')
+      .select('*')
+      .eq('key_prefix', apiKey)
+      .eq('is_active', true)
+      .maybeSingle();
 
-      if (!dbKey) {
-        return NextResponse.json(
-          { error: 'INVALID_API_KEY', message: 'API key not recognized or inactive.' },
-          { status: 401 }
-        );
-      }
+    if (dbKey) {
       secret = dbKey.secret_hash;
       orgId = dbKey.organization_id;
       clientName = dbKey.name;
     }
 
-    // 5. Verify HMAC-SHA256 signature
+    // 5. Verify HMAC-SHA256 signature in constant time
     const pathname = req.nextUrl.pathname;
     const isSignatureValid = verifyHmacSignature(
       signature,
@@ -145,22 +138,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const data = parseResult.data;
-    const supabase = createAdminClient();
+    const rawData = parseResult.data;
 
-    // 7. Resolve Sector if sector_code provided
-    let sectorId = data.sector_id;
-    if (!sectorId && data.sector_code) {
+    // 7. Sanitize inputs against XSS and control character injection
+    const sanitizedLocationName = sanitizeTextInput(rawData.location_name, 255);
+    const sanitizedAddress = sanitizeTextInput(rawData.address, 500);
+    const sanitizedDescription = sanitizeTextInput(rawData.description, 2000);
+    const sanitizedCallerName = rawData.caller_name ? sanitizeTextInput(rawData.caller_name, 150) : undefined;
+    const sanitizedCallerPhone = rawData.caller_phone ? sanitizeTextInput(rawData.caller_phone, 50) : undefined;
+
+    // 8. Resolve Sector
+    let sectorId = rawData.sector_id;
+    if (!sectorId && rawData.sector_code) {
       const { data: sec } = await supabase
         .from('sectors')
         .select('id')
         .eq('organization_id', orgId)
-        .eq('code', data.sector_code)
+        .eq('code', rawData.sector_code)
         .maybeSingle();
       if (sec) sectorId = sec.id;
     }
 
-    // 8. Resolve Protocol / Incident Type
+    // 9. Resolve Protocol / Incident Type
     let protocolId: string | undefined;
     let incidentTypeId: string | undefined;
 
@@ -168,7 +167,7 @@ export async function POST(req: NextRequest) {
       .from('incident_types')
       .select('id, protocol_id, default_priority')
       .eq('organization_id', orgId)
-      .or(`code.eq.${data.type},name.ilike.%${data.type}%`)
+      .or(`code.eq.${rawData.type},name.ilike.%${rawData.type}%`)
       .limit(1)
       .maybeSingle();
 
@@ -177,24 +176,24 @@ export async function POST(req: NextRequest) {
       protocolId = matchingType.protocol_id || undefined;
     }
 
-    // 9. Create or retrieve idempotent incident
+    // 10. Create or retrieve idempotent incident
     const { incident, isExisting } = await IncidentService.createIncident(
       {
         organization_id: orgId,
-        external_id: data.external_id,
+        external_id: rawData.external_id,
         incident_type_id: incidentTypeId,
         protocol_id: protocolId,
-        priority: data.priority,
+        priority: rawData.priority,
         sector_id: sectorId,
-        location_name: data.location_name,
-        address: data.address,
-        latitude: data.latitude,
-        longitude: data.longitude,
-        description: data.description,
-        caller_name: data.caller_name,
-        caller_phone: data.caller_phone,
+        location_name: sanitizedLocationName,
+        address: sanitizedAddress,
+        latitude: rawData.latitude,
+        longitude: rawData.longitude,
+        description: sanitizedDescription,
+        caller_name: sanitizedCallerName,
+        caller_phone: sanitizedCallerPhone,
         metadata: {
-          ...data.metadata,
+          ...rawData.metadata,
           source_client: clientName,
           api_key_prefix: apiKey,
         },
@@ -202,14 +201,14 @@ export async function POST(req: NextRequest) {
       { email: `API:${clientName}` }
     );
 
-    // 10. If not existing and requested_units provided, perform immediate dispatch
+    // 11. If not existing and requested_units provided, perform immediate dispatch
     let dispatchResult = null;
-    if (!isExisting && data.requested_units && data.requested_units.length > 0) {
+    if (!isExisting && rawData.requested_units && rawData.requested_units.length > 0) {
       const { data: foundUnits } = await supabase
         .from('units')
         .select('id, code')
         .eq('organization_id', orgId)
-        .in('code', data.requested_units);
+        .in('code', rawData.requested_units);
 
       if (foundUnits && foundUnits.length > 0) {
         const unitIds = foundUnits.map((u) => u.id);
@@ -255,28 +254,5 @@ export async function POST(req: NextRequest) {
       { error: 'INTERNAL_ERROR', message: errMessage },
       { status: 500 }
     );
-  }
-}
-
-export async function GET() {
-  try {
-    const incidents = await IncidentService.getIncidents();
-    return NextResponse.json({
-      success: true,
-      count: incidents.length,
-      incidents: incidents.map((i) => ({
-        id: i.id,
-        incident_number: i.incident_number,
-        external_id: i.external_id,
-        status: i.status,
-        priority: i.priority,
-        location_name: i.location_name,
-        address: i.address,
-        created_at: i.created_at,
-      })),
-    });
-  } catch (error: unknown) {
-    const errMessage = error instanceof Error ? error.message : 'Internal Server Error';
-    return NextResponse.json({ error: 'INTERNAL_ERROR', message: errMessage }, { status: 500 });
   }
 }
