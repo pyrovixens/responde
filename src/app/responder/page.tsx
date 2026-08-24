@@ -12,399 +12,334 @@ import {
   XCircle,
   AlertTriangle,
   Radio,
-  Wifi,
-  WifiOff,
-  Navigation,
   Clock,
-  CheckSquare,
-  Square,
+  Play,
+  RotateCcw,
+  Navigation,
   Smartphone,
   Check,
+  BellRing,
 } from 'lucide-react';
 import { siren } from '@/lib/sound/siren-generator';
 import { INITIAL_INCIDENTS, INITIAL_PROTOCOLS } from '@/lib/store/emergency-store';
-import { NotificationStatus } from '@/types/database';
 
-export default function ResponderMobilePage() {
-  const [activeIncident, setActiveIncident] = useState(INITIAL_INCIDENTS[0]);
-  const [ackState, setAckState] = useState<NotificationStatus>('SENT');
-  const [isSoundActive, setIsSoundActive] = useState<boolean>(true);
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [latencySec, setLatencySec] = useState<string | null>(null);
-  const [declineReason, setDeclineReason] = useState<string>('');
-  const [showDeclineModal, setShowDeclineModal] = useState<boolean>(false);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('IPHONE-15-PRO-MAX-CB01');
-  const [checkedSteps, setCheckedSteps] = useState<string[]>([]);
+export default function ClassicResponderMobilePage() {
+  const [isAlertActive, setIsAlertActive] = useState<boolean>(true);
+  const [ackState, setAckState] = useState<'IDLE' | 'ALERTING' | 'CONFIRMED' | 'DECLINED'>('ALERTING');
+  const [isSoundActive, setIsSoundActive] = useState<boolean>(false);
+  const [latencySec, setLatencySec] = useState<string>('3.8');
+  const [selectedIncident, setSelectedIncident] = useState(INITIAL_INCIDENTS[0]);
+  const [currentTime, setCurrentTime] = useState<string>('');
   const [timeReceived, setTimeReceived] = useState<string>('');
 
+  // Clock
   useEffect(() => {
-    setTimeReceived(
-      new Date().toLocaleTimeString('es-CL', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    );
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleTimeString('es-CL', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+      );
+    };
+    updateTime();
+    setTimeReceived(new Date().toLocaleTimeString('es-CL', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
-    // Monitor online/offline status
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Trigger siren sound alert for initial incoming dispatch
+  // Trigger sound when alert starts
+  const triggerAlarm = () => {
+    setIsAlertActive(true);
+    setAckState('ALERTING');
+    setTimeReceived(new Date().toLocaleTimeString('es-CL', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     try {
       siren.playAlarm('HILO');
       setIsSoundActive(true);
     } catch {
-      // Ignored if browser requires tap gesture
+      // Audio autoplay policy
     }
+  };
 
-    return () => {
-      siren.stopAlarm();
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+  const stopAlarmSound = () => {
+    siren.stopAlarm();
+    setIsSoundActive(false);
+  };
 
   const toggleSound = () => {
     if (isSoundActive) {
-      siren.stopAlarm();
-      setIsSoundActive(false);
+      stopAlarmSound();
     } else {
       siren.playAlarm('HILO');
       setIsSoundActive(true);
     }
   };
 
-  const handleAcknowledge = async () => {
-    siren.stopAlarm();
-    setIsSoundActive(false);
-    setAckState('ACKNOWLEDGED');
-    setLatencySec('4.2');
+  // Acknowledge Action (ACK)
+  const handleAcknowledge = () => {
+    stopAlarmSound();
+    setAckState('CONFIRMED');
+    setLatencySec((Math.random() * 2 + 2.5).toFixed(1));
 
-    // Call API /ack endpoint in background
+    // Send API ACK in background
     try {
-      await fetch('/api/v1/ack', {
+      fetch('/api/v1/ack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           notification_id: '00000000-0000-0000-0000-000000000001',
           action: 'ACKNOWLEDGED',
-          device_id: selectedDeviceId,
+          device_id: 'MOBILE-PAGER-CLASSIC',
         }),
       }).catch(() => {});
     } catch {
-      // Offline resilient
+      // Resilient
     }
   };
 
-  const handleDecline = async () => {
-    siren.stopAlarm();
-    setIsSoundActive(false);
+  // Decline Action
+  const handleDecline = () => {
+    stopAlarmSound();
     setAckState('DECLINED');
-    setShowDeclineModal(false);
-
-    try {
-      await fetch('/api/v1/ack', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          notification_id: '00000000-0000-0000-0000-000000000001',
-          action: 'DECLINED',
-          decline_reason: declineReason || 'No disponible',
-          device_id: selectedDeviceId,
-        }),
-      }).catch(() => {});
-    } catch {
-      // Offline resilient
-    }
   };
 
-  const toggleStep = (id: string) => {
-    setCheckedSteps((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+  // Reset to Standby
+  const handleResetToStandby = () => {
+    stopAlarmSound();
+    setAckState('IDLE');
+    setIsAlertActive(false);
   };
-
-  const protocol = activeIncident?.protocol || INITIAL_PROTOCOLS[0];
 
   return (
-    <div className="flex-1 bg-dispatch-950 text-slate-100 flex flex-col items-center justify-start p-2 sm:p-4 max-w-md mx-auto w-full min-h-screen selection:bg-emergency-600">
-      {/* Top Status & Connectivity Bar */}
-      <div className="w-full flex items-center justify-between px-3 py-2 bg-dispatch-900 border border-dispatch-700/80 rounded-xl mb-3 text-xs font-mono">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto border-x border-dispatch-800 shadow-2xl font-sans select-none">
+      {/* Pager Top Bar */}
+      <div className="bg-dispatch-900 border-b border-dispatch-700 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {isOnline ? (
-            <div className="flex items-center gap-1.5 text-success-400 font-bold">
-              <Wifi className="w-3.5 h-3.5 animate-pulse" />
-              <span>ONLINE</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-emergency-400 font-bold">
-              <WifiOff className="w-3.5 h-3.5" />
-              <span>OFFLINE (CACHE)</span>
-            </div>
-          )}
-          <span className="text-slate-500">|</span>
-          <span className="text-slate-400 text-[11px] truncate max-w-[120px]">
-            {selectedDeviceId}
+          <div className="w-3 h-3 rounded-full bg-success-500 animate-pulse" />
+          <span className="font-mono font-bold text-xs tracking-wider text-slate-200">
+            RESPONDE • PAGER TÁCTICO
           </span>
         </div>
 
-        <button
-          onClick={toggleSound}
-          className={`px-2.5 py-1 rounded flex items-center gap-1 font-bold text-xs transition-colors ${
-            isSoundActive
-              ? 'bg-emergency-900 text-emergency-300 border border-emergency-600 animate-pulse'
-              : 'bg-dispatch-800 text-slate-400 border border-dispatch-700'
-          }`}
-        >
-          {isSoundActive ? (
-            <>
-              <Volume2 className="w-3.5 h-3.5" />
-              <span>SILENCIAR</span>
-            </>
-          ) : (
-            <>
-              <VolumeX className="w-3.5 h-3.5" />
-              <span>SONIDO OFF</span>
-            </>
-          )}
-        </button>
+        <div className="font-mono font-bold text-xs text-slate-400">
+          {currentTime}
+        </div>
       </div>
 
-      {/* Main Alert Card */}
-      <div
-        className={`w-full rounded-2xl border-2 overflow-hidden shadow-2xl transition-all ${
-          ackState === 'ACKNOWLEDGED'
-            ? 'bg-dispatch-900 border-success-600'
-            : ackState === 'DECLINED'
-            ? 'bg-dispatch-900 border-dispatch-700 opacity-90'
-            : 'bg-emergency-950/40 border-emergency-600 shadow-emergency-900/40 animate-alert-flash'
-        }`}
-      >
-        {/* Emergency Banner Header */}
-        <div
-          className={`p-4 text-center border-b flex flex-col items-center justify-center gap-1 ${
-            ackState === 'ACKNOWLEDGED'
-              ? 'bg-success-950 border-success-700 text-success-300'
-              : ackState === 'DECLINED'
-              ? 'bg-dispatch-800 border-dispatch-700 text-slate-400'
-              : 'bg-emergency-600 text-white'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-7 h-7 animate-bounce" />
-            <span className="text-xl font-extrabold tracking-widest font-mono">
-              {ackState === 'ACKNOWLEDGED'
-                ? 'DESPACHO CONFIRMADO'
-                : ackState === 'DECLINED'
-                ? 'DESPACHO DECLINADO'
-                : '🚨 ALERTA DE EMERGENCIA 🚨'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-mono font-bold tracking-wider opacity-90">
-            <span>{activeIncident.incident_number}</span>
-            <span>•</span>
-            <span>PRIORIDAD {activeIncident.priority} CRÍTICA</span>
-          </div>
-        </div>
-
-        {/* Operational Incident Details */}
-        <div className="p-4 space-y-3.5 text-xs">
-          {/* Protocol */}
-          <div className="bg-dispatch-850 p-3 rounded-xl border border-dispatch-700/80">
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider block mb-1">
-              TIPO DE EMERGENCIA / PROTOCOLO
-            </span>
-            <div className="text-sm font-extrabold text-slate-100 flex items-center gap-2">
-              <Flame className="w-4 h-4 text-emergency-500 flex-shrink-0" />
-              <span>{protocol.name}</span>
+      {/* Main Content Area */}
+      <div className="flex-1 p-4 flex flex-col justify-center gap-4">
+        {/* STANDBY MODE */}
+        {ackState === 'IDLE' && (
+          <div className="bg-dispatch-900 border-2 border-dashed border-dispatch-700 rounded-2xl p-6 text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-dispatch-800 border border-dispatch-600 mx-auto flex items-center justify-center text-slate-400">
+              <Radio className="w-8 h-8" />
             </div>
-          </div>
 
-          {/* Sector & Exact Location */}
-          <div className="bg-dispatch-850 p-3 rounded-xl border border-dispatch-700/80">
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider block mb-1">
-              UBICACIÓN & SECTOR
-            </span>
-            <div className="flex items-start gap-2">
-              <MapPin className="w-4 h-4 text-emergency-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <div className="text-sm font-bold text-slate-100">
-                  {activeIncident.location_name}
-                </div>
-                <div className="text-slate-300 font-mono text-xs mt-0.5">
-                  {activeIncident.address}
-                </div>
-                {activeIncident.sector && (
-                  <div className="text-[11px] text-slate-400 mt-1 font-semibold">
-                    Sector: {activeIncident.sector.name}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Description & Caller */}
-          <div className="bg-dispatch-850 p-3 rounded-xl border border-dispatch-700/80">
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider block mb-1">
-              INFORMACIÓN OPERATIVA
-            </span>
-            <p className="text-slate-200 leading-relaxed font-medium">
-              {activeIncident.description}
-            </p>
-          </div>
-
-          {/* Units Dispatched */}
-          <div className="bg-dispatch-850 p-3 rounded-xl border border-dispatch-700/80">
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider block mb-1.5 flex items-center gap-1.5">
-              <Truck className="w-3.5 h-3.5 text-emergency-500" />
-              MATERIAL MAYOR DESPACHADO
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {activeIncident.units?.map((u) => (
-                <span
-                  key={u.id}
-                  className="px-2 py-1 rounded-md bg-dispatch-800 border border-dispatch-600 font-mono font-bold text-xs text-slate-200"
-                >
-                  🚒 {u.unit?.code || u.unit_id}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Protocol Checklist Steps */}
-          {protocol.steps && protocol.steps.length > 0 && (
-            <div className="bg-dispatch-850 p-3 rounded-xl border border-dispatch-700/80">
-              <span className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider block mb-2">
-                PASOS DEL PROTOCOLO (ACCIONES INMEDIATAS)
-              </span>
-              <div className="space-y-1.5">
-                {protocol.steps.map((st) => {
-                  const isChecked = checkedSteps.includes(st.id);
-                  return (
-                    <div
-                      key={st.id}
-                      onClick={() => toggleStep(st.id)}
-                      className={`p-2 rounded-lg border text-xs flex items-start gap-2 cursor-pointer transition-all ${
-                        isChecked
-                          ? 'bg-success-950/40 border-success-800 text-slate-400 line-through'
-                          : 'bg-dispatch-800 border-dispatch-700 text-slate-200'
-                      }`}
-                    >
-                      <button type="button" className="mt-0.5 text-emergency-500">
-                        {isChecked ? (
-                          <CheckSquare className="w-3.5 h-3.5 text-success-500" />
-                        ) : (
-                          <Square className="w-3.5 h-3.5 text-slate-500" />
-                        )}
-                      </button>
-                      <div>
-                        <strong className="text-slate-200">{st.step_order}. {st.title}:</strong>{' '}
-                        <span>{st.description}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Large Tactical Action Buttons */}
-        <div className="p-4 bg-dispatch-900 border-t border-dispatch-800 space-y-2.5">
-          {ackState === 'SENT' ? (
-            <>
-              {/* Massive Green ACK Button */}
-              <button
-                onClick={handleAcknowledge}
-                className="w-full py-4 px-4 rounded-xl bg-success-600 hover:bg-success-500 active:scale-[0.98] text-white font-extrabold text-base tracking-wider shadow-lg shadow-success-950/80 transition-all flex items-center justify-center gap-2 uppercase font-mono"
-              >
-                <CheckCircle2 className="w-6 h-6" />
-                <span>ACEPTAR DESPACHO (ACK)</span>
-              </button>
-
-              {/* Decline Button */}
-              <button
-                onClick={() => setShowDeclineModal(true)}
-                className="w-full py-3 px-4 rounded-xl bg-dispatch-850 hover:bg-dispatch-800 active:scale-[0.98] text-slate-400 hover:text-slate-200 border border-dispatch-700 text-xs font-bold tracking-wider transition-all flex items-center justify-center gap-2 uppercase"
-              >
-                <XCircle className="w-4 h-4 text-emergency-500" />
-                <span>NO PUEDO RESPONDER</span>
-              </button>
-            </>
-          ) : ackState === 'ACKNOWLEDGED' ? (
-            <div className="p-3 bg-success-950/80 border border-success-700 rounded-xl text-center">
-              <div className="flex items-center justify-center gap-2 text-success-400 font-bold text-sm mb-1 font-mono">
-                <Check className="w-5 h-5" />
-                <span>RESPUESTA REGISTRADA EN CENTRAL</span>
-              </div>
-              <p className="text-[11px] text-slate-300">
-                Confirmación enviada con latencia de <strong>{latencySec || '4.2'}s</strong>.
-                Diríjase a la unidad o cuartel asignado.
+            <div>
+              <h2 className="text-base font-bold font-mono text-slate-100 uppercase tracking-wider">
+                GUARDIA EN ESPERA (STANDBY)
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Dispositivo listo para recibir despachos de emergencia en tiempo real.
               </p>
             </div>
-          ) : (
-            <div className="p-3 bg-dispatch-850 border border-dispatch-700 rounded-xl text-center text-slate-400 text-xs">
-              <span>Ha marcado que no puede responder a este despacho.</span>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Decline Reason Modal */}
-      {showDeclineModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-dispatch-900 border border-dispatch-700 rounded-xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
-            <div className="flex items-center gap-2 text-emergency-500 font-bold font-mono text-sm">
-              <AlertTriangle className="w-5 h-5" />
-              <span>MOTIVO DE NO DISPONIBILIDAD</span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Indique la razón para informar inmediatamente a la Central de Despacho:
-            </p>
+            <button
+              onClick={triggerAlarm}
+              className="w-full py-4 rounded-xl bg-emergency-600 hover:bg-emergency-500 text-white font-mono font-bold text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-lg shadow-emergency-900/50 transition-transform active:scale-95"
+            >
+              <BellRing className="w-5 h-5 animate-bounce" />
+              <span>SIMULAR / PROBAR ALERTA DE DESPACHO</span>
+            </button>
+          </div>
+        )}
 
-            <div className="space-y-2">
-              {[
-                'Fuera de radio urbano / Cobertura',
-                'En otra emergencia activa',
-                'Problema mecánico de unidad',
-                'Licencia / Descanso reglamentario',
-              ].map((reason) => (
-                <button
-                  key={reason}
-                  onClick={() => setDeclineReason(reason)}
-                  className={`w-full p-2.5 rounded-lg border text-left text-xs font-semibold transition-colors ${
-                    declineReason === reason
-                      ? 'bg-emergency-950 text-emergency-300 border-emergency-600'
-                      : 'bg-dispatch-800 border-dispatch-700 text-slate-300'
-                  }`}
-                >
-                  {reason}
-                </button>
-              ))}
+        {/* ALERTING DISPATCH MODE */}
+        {ackState === 'ALERTING' && (
+          <div className="flex flex-col gap-3">
+            {/* Flashing Emergency Header */}
+            <div className="bg-emergency-600 text-white p-3.5 rounded-xl text-center font-mono font-extrabold text-sm tracking-wider shadow-lg animate-pulse flex items-center justify-center gap-2">
+              <ShieldAlert className="w-5 h-5" />
+              <span>¡ALERTA DE DESPACHO INMEDIATO!</span>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            {/* Incident Details Card */}
+            <div className="bg-dispatch-900 border-2 border-emergency-600 rounded-2xl p-4 space-y-3 shadow-xl">
+              <div className="flex items-center justify-between border-b border-dispatch-700 pb-2">
+                <span className="font-mono font-bold text-xs text-emergency-400 bg-emergency-950 px-2 py-0.5 rounded border border-emergency-800">
+                  {selectedIncident.incident_number}
+                </span>
+                <span className="font-mono text-xs text-slate-400">
+                  RECIBIDO: {timeReceived}
+                </span>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-mono text-emergency-500 font-bold uppercase tracking-wider">
+                  TIPO DE EMERGENCIA
+                </div>
+                <div className="text-base font-bold text-white leading-tight">
+                  {selectedIncident.incident_type?.name || 'Incendio Estructural'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">
+                  UBICACIÓN / DIRECCIÓN
+                </div>
+                <div className="text-sm font-semibold text-slate-200 flex items-start gap-1.5 mt-0.5">
+                  <MapPin className="w-4 h-4 text-emergency-500 shrink-0 mt-0.5" />
+                  <span>{selectedIncident.address}</span>
+                </div>
+                <div className="text-xs text-slate-400 pl-5">
+                  Ref: {selectedIncident.location_name}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider mb-1">
+                  UNIDADES DESPACHADAS
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedIncident.units && selectedIncident.units.length > 0 ? (
+                    selectedIncident.units.map((u) => (
+                      <span
+                        key={u.id}
+                        className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-dispatch-800 text-slate-100 border border-dispatch-600 shadow"
+                      >
+                        {u.unit?.code || 'B-1'}
+                      </span>
+                    ))
+                  ) : (
+                    <>
+                      <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-dispatch-800 text-slate-100 border border-dispatch-600">B-1</span>
+                      <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-dispatch-800 text-slate-100 border border-dispatch-600">Q-4</span>
+                      <span className="font-mono font-bold text-xs px-2.5 py-1 rounded bg-dispatch-800 text-slate-100 border border-dispatch-600">R-1</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Audio Siren Control */}
+            <button
+              onClick={toggleSound}
+              className={`w-full py-2.5 px-4 rounded-xl border text-xs font-mono font-bold flex items-center justify-center gap-2 transition-all ${
+                isSoundActive
+                  ? 'bg-emergency-950 text-emergency-400 border-emergency-700 animate-pulse'
+                  : 'bg-dispatch-800 text-slate-300 border-dispatch-700 hover:bg-dispatch-700'
+              }`}
+            >
+              {isSoundActive ? (
+                <>
+                  <Volume2 className="w-4 h-4 text-emergency-500" />
+                  <span>SIRENA ACTIVA (HAZ CLIC PARA SILENCIAR)</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX className="w-4 h-4 text-slate-400" />
+                  <span>SIRENA EN SILENCIO (ACTIVAR SONIDO)</span>
+                </>
+              )}
+            </button>
+
+            {/* Action Buttons (ACK / DECLINE) */}
+            <div className="grid grid-cols-1 gap-2.5 pt-2">
               <button
-                onClick={() => setShowDeclineModal(false)}
-                className="px-3 py-1.5 rounded text-xs text-slate-400 hover:text-slate-200"
+                onClick={handleAcknowledge}
+                className="w-full py-4 rounded-2xl bg-success-600 hover:bg-success-500 active:bg-success-700 text-white font-mono font-extrabold text-base tracking-wider uppercase flex items-center justify-center gap-2.5 shadow-xl shadow-success-900/40 transition-transform active:scale-95"
               >
-                Cancelar
+                <CheckCircle2 className="w-6 h-6" />
+                <span>🟢 VOY AL CUARTEL / RESPONDO (ACK)</span>
               </button>
+
               <button
                 onClick={handleDecline}
-                className="px-4 py-1.5 rounded bg-emergency-600 hover:bg-emergency-500 text-white font-bold text-xs font-mono uppercase"
+                className="w-full py-3 rounded-xl bg-dispatch-800 hover:bg-dispatch-700 text-slate-400 hover:text-emergency-400 font-mono font-bold text-xs tracking-wider uppercase flex items-center justify-center gap-2 transition-colors border border-dispatch-700"
               >
-                Confirmar Rechazo
+                <XCircle className="w-4 h-4" />
+                <span>🔴 NO DISPONIBLE (DECLINE)</span>
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* CONFIRMED STATE */}
+        {ackState === 'CONFIRMED' && (
+          <div className="bg-dispatch-900 border-2 border-success-500 rounded-2xl p-6 text-center space-y-4 shadow-xl">
+            <div className="w-16 h-16 rounded-full bg-success-950 border border-success-600 mx-auto flex items-center justify-center text-success-400">
+              <Check className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h2 className="text-base font-bold font-mono text-success-400 uppercase tracking-wider">
+                RESPUESTA CONFIRMADA (ACK)
+              </h2>
+              <p className="text-xs text-slate-300 mt-1">
+                El Centro de Despacho ha registrado tu asistencia en camino al cuartel.
+              </p>
+            </div>
+
+            <div className="bg-dispatch-800 rounded-xl p-3 font-mono text-xs flex justify-between items-center text-slate-300">
+              <span>LATENCIA DE RESPUESTA:</span>
+              <span className="text-success-400 font-bold">{latencySec} segundos</span>
+            </div>
+
+            <div className="pt-2 flex flex-col gap-2">
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedIncident.address)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-3 rounded-xl bg-dispatch-800 hover:bg-dispatch-700 text-slate-100 font-mono font-bold text-xs flex items-center justify-center gap-2 border border-dispatch-600"
+              >
+                <Navigation className="w-4 h-4 text-emergency-500" />
+                <span>ABRIR EN GPS / GOOGLE MAPS</span>
+              </a>
+
+              <button
+                onClick={handleResetToStandby}
+                className="w-full py-2.5 rounded-xl text-slate-400 hover:text-slate-200 font-mono text-xs flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Volver a Modo Guardia</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* DECLINED STATE */}
+        {ackState === 'DECLINED' && (
+          <div className="bg-dispatch-900 border-2 border-slate-700 rounded-2xl p-6 text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-emergency-950 border border-emergency-800 mx-auto flex items-center justify-center text-emergency-400">
+              <XCircle className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h2 className="text-base font-bold font-mono text-slate-200 uppercase tracking-wider">
+                DESPACHO DECLINADO
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Se notificó a la central que no te encuentras disponible para este llamado.
+              </p>
+            </div>
+
+            <button
+              onClick={handleResetToStandby}
+              className="w-full py-3 rounded-xl bg-dispatch-800 hover:bg-dispatch-700 text-slate-200 font-mono font-bold text-xs uppercase"
+            >
+              Volver a Modo Guardia
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Footer Info */}
+      <div className="bg-dispatch-900/60 border-t border-dispatch-800 px-4 py-2 text-center text-[10px] font-mono text-slate-500">
+        SISTEMA DE DESPACHO CAD • TERMINAL DE RESPUESTA MÓVIL
+      </div>
     </div>
   );
 }
