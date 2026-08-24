@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { Dispatch, IncidentUnit, Notification } from '@/types/database';
 import { DispatchExecutionInput } from '@/types/emergency';
 import { logAuditEvent } from './audit-service';
+import { TelegramService } from './telegram-service';
 
 export class DispatchService {
   /**
@@ -20,7 +21,7 @@ export class DispatchService {
     // 1. Verify incident exists
     const { data: incident, error: incError } = await supabase
       .from('incidents')
-      .select('id, organization_id, incident_number, priority, status, protocol:protocols(*)')
+      .select('id, organization_id, incident_number, priority, status, location_name, address, description, protocol:protocols(*)')
       .eq('id', input.incident_id)
       .single();
 
@@ -164,6 +165,18 @@ export class DispatchService {
         unit_ids: input.unit_ids,
         recipients_count: notifications.length,
       },
+    });
+
+    // 9. Send Telegram Alert Broadcast in background (if configured)
+    TelegramService.sendDispatchAlert({
+      incident_number: incident.incident_number,
+      location_name: incident.location_name,
+      address: incident.address,
+      description: incident.description,
+      priority: incident.priority,
+      units_dispatched: assignedUnits.map((u) => u.unit?.code || u.unit_id),
+    }).catch((err) => {
+      console.warn('[DispatchService] Telegram alert broadcast warning:', err);
     });
 
     return {

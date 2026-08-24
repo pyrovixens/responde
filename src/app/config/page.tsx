@@ -15,6 +15,9 @@ import {
   AlertTriangle,
   FileCheck,
   Shield,
+  Send,
+  Bot,
+  ExternalLink,
 } from 'lucide-react';
 import {
   INITIAL_UNITS,
@@ -24,7 +27,7 @@ import {
 import { Unit, Sector, Protocol, UnitStatus, IncidentPriority } from '@/types/database';
 
 export default function ConfigPage() {
-  const [activeTab, setActiveTab] = useState<'ORG' | 'UNITS' | 'SECTORS' | 'PROTOCOLS' | 'RESET'>('ORG');
+  const [activeTab, setActiveTab] = useState<'ORG' | 'UNITS' | 'SECTORS' | 'PROTOCOLS' | 'TELEGRAM' | 'RESET'>('ORG');
 
   // Organization state
   const [orgName, setOrgName] = useState<string>('Cuerpo de Bomberos & Rescate Metropolitano');
@@ -32,6 +35,12 @@ export default function ConfigPage() {
   const [orgAddress, setOrgAddress] = useState<string>('Av. Central 1450, Cuartel General');
   const [orgPhone, setOrgPhone] = useState<string>('+56 2 2698 1234');
   const [defaultAckTimeout, setDefaultAckTimeout] = useState<number>(45);
+
+  // Telegram Bot state
+  const [telegramBotToken, setTelegramBotToken] = useState<string>('');
+  const [telegramChatId, setTelegramChatId] = useState<string>('');
+  const [telegramTestStatus, setTelegramTestStatus] = useState<string | null>(null);
+  const [isTestingTelegram, setIsTestingTelegram] = useState<boolean>(false);
 
   // Units state
   const [units, setUnits] = useState<Unit[]>(INITIAL_UNITS);
@@ -68,6 +77,14 @@ export default function ConfigPage() {
         setOrgPhone(parsed.phone || orgPhone);
         setDefaultAckTimeout(parsed.timeout || 45);
       }
+
+      const savedTg = localStorage.getItem('responde_custom_telegram');
+      if (savedTg) {
+        const parsedTg = JSON.parse(savedTg);
+        setTelegramBotToken(parsedTg.token || '');
+        setTelegramChatId(parsedTg.chatId || '');
+      }
+
       const savedUnits = localStorage.getItem('responde_custom_units');
       if (savedUnits) setUnits(JSON.parse(savedUnits));
 
@@ -81,6 +98,38 @@ export default function ConfigPage() {
     }
   }, []);
 
+  const handleTestTelegram = async () => {
+    if (!telegramBotToken.trim() || !telegramChatId.trim()) {
+      setTelegramTestStatus('Por favor ingresa el Bot Token y el Chat ID primero.');
+      return;
+    }
+
+    setIsTestingTelegram(true);
+    setTelegramTestStatus(null);
+
+    try {
+      const res = await fetch('/api/v1/telegram/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          botToken: telegramBotToken.trim(),
+          chatId: telegramChatId.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTelegramTestStatus('✅ ¡Mensaje de prueba enviado exitosamente a tu chat de Telegram!');
+      } else {
+        setTelegramTestStatus(`❌ Error: ${data.message || 'No se pudo conectar con Telegram'}`);
+      }
+    } catch (err: unknown) {
+      setTelegramTestStatus('❌ Error de red al probar conexión con Telegram.');
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  };
+
   const handleSaveAll = () => {
     try {
       localStorage.setItem(
@@ -91,6 +140,13 @@ export default function ConfigPage() {
           address: orgAddress,
           phone: orgPhone,
           timeout: defaultAckTimeout,
+        })
+      );
+      localStorage.setItem(
+        'responde_custom_telegram',
+        JSON.stringify({
+          token: telegramBotToken,
+          chatId: telegramChatId,
         })
       );
       localStorage.setItem('responde_custom_units', JSON.stringify(units));
@@ -324,6 +380,18 @@ export default function ConfigPage() {
         </button>
 
         <button
+          onClick={() => setActiveTab('TELEGRAM')}
+          className={`py-2 px-3 rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'TELEGRAM'
+              ? 'bg-dispatch-700 text-white shadow border border-dispatch-600'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Send className="w-3.5 h-3.5 text-emergency-500" />
+          <span>5. Bot de Telegram</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('RESET')}
           className={`py-2 px-3 rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap ${
             activeTab === 'RESET'
@@ -332,7 +400,7 @@ export default function ConfigPage() {
           }`}
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          <span>5. Pizarra en Blanco / Reset</span>
+          <span>6. Pizarra en Blanco / Reset</span>
         </button>
       </div>
 
@@ -692,7 +760,77 @@ export default function ConfigPage() {
         </div>
       )}
 
-      {/* TAB 5: Reset / Clean Slate */}
+      {/* TAB 5: Telegram Bot Integration */}
+      {activeTab === 'TELEGRAM' && (
+        <div className="bg-dispatch-900 border border-dispatch-700 rounded-xl p-5 space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-100 font-mono uppercase tracking-wider flex items-center gap-2">
+              <Send className="w-4 h-4 text-emergency-500" />
+              Integración de Bot de Telegram para Despachos & Alertas
+            </h2>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-dispatch-800 text-slate-300 border border-dispatch-600">
+              ALERTAS CON BOTONES ACK EN VIVO
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Conecta un Bot de Telegram para que cada vez que se emita una emergencia en el Centro de Despacho, se envíe automáticamente una notificación instantánea a tu Grupo de Bomberos o Canal de Rescate con botones interactivos de <b>[🟢 VOY AL CUARTEL]</b> y <b>[📍 VER MAPA]</b>.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Telegram Bot Token *
+              </label>
+              <input
+                type="text"
+                value={telegramBotToken}
+                onChange={(e) => setTelegramBotToken(e.target.value)}
+                placeholder="Ej. 7123456789:AAFlKj99xY2qW..."
+                className="w-full bg-dispatch-800 border border-dispatch-600 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-emergency-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Obtenlo en 30 segundos abriendo <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-emergency-400 underline inline-flex items-center gap-0.5">@BotFather <ExternalLink className="w-3 h-3 inline" /></a> en Telegram y enviando <code>/newbot</code>.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Chat ID o ID de Grupo / Canal *
+              </label>
+              <input
+                type="text"
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
+                placeholder="Ej. -1001928374650 o tu ID personal"
+                className="w-full bg-dispatch-800 border border-dispatch-600 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-emergency-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Agrega tu bot como Administrador a tu Grupo o Canal de bomberos, o envía <code>/start</code> al bot para obtener tu Chat ID.
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-dispatch-800 flex flex-wrap items-center justify-between gap-3">
+            <button
+              onClick={handleTestTelegram}
+              disabled={isTestingTelegram}
+              className="px-4 py-2.5 rounded-xl bg-dispatch-800 hover:bg-dispatch-700 text-slate-200 border border-dispatch-600 font-bold font-mono text-xs uppercase tracking-wider flex items-center gap-2 shadow transition-all disabled:opacity-50"
+            >
+              <Bot className="w-4 h-4 text-emergency-500" />
+              <span>{isTestingTelegram ? 'Enviando prueba...' : '🧪 Probar Conexión con Telegram'}</span>
+            </button>
+
+            {telegramTestStatus && (
+              <div className="text-xs font-mono font-bold text-slate-200">
+                {telegramTestStatus}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 6: Reset / Clean Slate */}
       {activeTab === 'RESET' && (
         <div className="bg-dispatch-900 border border-dispatch-700 rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-2 text-emergency-400 font-bold font-mono text-sm">
