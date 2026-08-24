@@ -182,7 +182,8 @@ CREATE TABLE IF NOT EXISTS protocol_steps (
     title VARCHAR(150) NOT NULL,
     description TEXT,
     is_mandatory BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT unique_proto_step UNIQUE (protocol_id, step_order)
 );
 
 CREATE TABLE IF NOT EXISTS incident_types (
@@ -445,11 +446,11 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO protocols (id, organization_id, code, name, description, default_priority, ack_timeout_seconds, suggested_unit_type_codes, auto_escalate_supervisor)
 VALUES
-    ('e0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'INCENDIO_ESTRUCTURAL', 'Incendio Estructural / Fuego en Edificación', 'Alarma por fuego declarado', 'P1', 45, ARRAY['BOMBA', 'ESCALA', 'RESCATE'], true),
-    ('e0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'ACCIDENTE_VEHICULAR', 'Accidente Vehicular con Atrapados (10-4)', 'Colisión con personas atrapadas', 'P1', 45, ARRAY['RESCATE', 'AMBULANCIA', 'BOMBA'], true),
-    ('e0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', 'RESCATE_AGRESTE', 'Rescate en Montaña / Agreste / Desnivel', 'Búsqueda y extracción', 'P2', 60, ARRAY['RESCATE', 'COMANDO'], true),
-    ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000001', 'DERRAME_QUIMICO', 'Materiales Peligrosos / HazMat (10-5)', 'Fuga de gas o químicos', 'P1', 45, ARRAY['HAZMAT', 'BOMBA', 'COMANDO'], true),
-    ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'EMERGENCIA_MEDICA', 'Emergencia Médica de Soporte Vital', 'Paro cardiorrespiratorio o trauma', 'P1', 30, ARRAY['AMBULANCIA', 'RESCATE'], true)
+    ('e0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'INCENDIO_ESTRUCTURAL', 'Incendio Estructural / Fuego en Edificación', 'Alarma por fuego declarado', 'P1', 45, ARRAY['BOMBA', 'ESCALA', 'RESCATE']::TEXT[], true),
+    ('e0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'ACCIDENTE_VEHICULAR', 'Accidente Vehicular con Atrapados (10-4)', 'Colisión con personas atrapadas', 'P1', 45, ARRAY['RESCATE', 'AMBULANCIA', 'BOMBA']::TEXT[], true),
+    ('e0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', 'RESCATE_AGRESTE', 'Rescate en Montaña / Agreste / Desnivel', 'Búsqueda y extracción', 'P2', 60, ARRAY['RESCATE', 'COMANDO']::TEXT[], true),
+    ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000001', 'DERRAME_QUIMICO', 'Materiales Peligrosos / HazMat (10-5)', 'Fuga de gas o químicos', 'P1', 45, ARRAY['HAZMAT', 'BOMBA', 'COMANDO']::TEXT[], true),
+    ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'EMERGENCIA_MEDICA', 'Emergencia Médica de Soporte Vital', 'Paro cardiorrespiratorio o trauma', 'P1', 30, ARRAY['AMBULANCIA', 'RESCATE']::TEXT[], true)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO protocol_steps (protocol_id, step_order, title, description, is_mandatory)
@@ -463,7 +464,8 @@ VALUES
     ('e0000000-0000-0000-0000-000000000002', 2, 'Línea de Agua Preventiva', 'Línea presurizada con pitón cerrado lista', true),
     ('e0000000-0000-0000-0000-000000000002', 3, 'Estabilización de Vehículos', 'Acuñamiento en cuatro puntos y corte de batería', true),
     ('e0000000-0000-0000-0000-000000000002', 4, 'Extricación Hidráulica', 'Remoción de puertas/techo con cizalla y expansor', true),
-    ('e0000000-0000-0000-0000-000000000002', 5, 'Inmovilización Espinal', 'Collar cervical, tabla y entrega a equipo SAMU', true);
+    ('e0000000-0000-0000-0000-000000000002', 5, 'Inmovilización Espinal', 'Collar cervical, tabla y entrega a equipo SAMU', true)
+ON CONFLICT (protocol_id, step_order) DO NOTHING;
 
 INSERT INTO incident_types (id, organization_id, protocol_id, code, name, default_priority, icon, color)
 VALUES
