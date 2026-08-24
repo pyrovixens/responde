@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldAlert,
   Flame,
@@ -18,7 +18,7 @@ import {
   INITIAL_SECTORS,
   INITIAL_PROTOCOLS,
 } from '@/lib/store/emergency-store';
-import { Incident, Unit, IncidentStatus, UnitStatus } from '@/types/database';
+import { Incident, Unit, IncidentStatus, UnitStatus, Protocol, Sector } from '@/types/database';
 import { CreateIncidentInput } from '@/types/emergency';
 import { ActiveIncidentsList } from '@/components/dispatch/ActiveIncidentsList';
 import { CreateIncidentModal } from '@/components/dispatch/CreateIncidentModal';
@@ -29,8 +29,26 @@ import { TacticalMap } from '@/components/dispatch/TacticalMap';
 export default function DispatchCenterPage() {
   const [incidents, setIncidents] = useState<Incident[]>(INITIAL_INCIDENTS);
   const [units, setUnits] = useState<Unit[]>(INITIAL_UNITS);
+  const [sectors, setSectors] = useState<Sector[]>(INITIAL_SECTORS);
+  const [protocols, setProtocols] = useState<Protocol[]>(INITIAL_PROTOCOLS);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+
+  // Load custom user configured fleet, sectors, and protocols
+  useEffect(() => {
+    try {
+      const savedUnits = localStorage.getItem('responde_custom_units');
+      if (savedUnits) setUnits(JSON.parse(savedUnits));
+
+      const savedSectors = localStorage.getItem('responde_custom_sectors');
+      if (savedSectors) setSectors(JSON.parse(savedSectors));
+
+      const savedProtocols = localStorage.getItem('responde_custom_protocols');
+      if (savedProtocols) setProtocols(JSON.parse(savedProtocols));
+    } catch {
+      // Ignored
+    }
+  }, []);
 
   // Handle New Incident Creation & Immediate Dispatch
   const handleCreateIncident = async (
@@ -39,8 +57,8 @@ export default function DispatchCenterPage() {
   ) => {
     const now = new Date().toISOString();
     const newIncNumber = `EMG-2026-${String(incidents.length + 186).padStart(6, '0')}`;
-    const matchedProtocol = INITIAL_PROTOCOLS.find((p) => p.id === input.protocol_id) || INITIAL_PROTOCOLS[0];
-    const matchedSector = INITIAL_SECTORS.find((s) => s.id === input.sector_id) || INITIAL_SECTORS[0];
+    const matchedProtocol = protocols.find((p) => p.id === input.protocol_id) || protocols[0] || INITIAL_PROTOCOLS[0];
+    const matchedSector = sectors.find((s) => s.id === input.sector_id) || sectors[0] || INITIAL_SECTORS[0];
 
     // Assigned Units
     const assignedUnits = selectedUnitIds.map((uid) => {
@@ -363,7 +381,7 @@ export default function DispatchCenterPage() {
           <TacticalMap
             incidents={incidents.filter((i) => !['CLOSED', 'CANCELLED'].includes(i.status))}
             units={units}
-            sectors={INITIAL_SECTORS}
+            sectors={sectors}
             onSelectIncident={(inc) => setSelectedIncident(inc)}
           />
         </div>
@@ -381,8 +399,8 @@ export default function DispatchCenterPage() {
       <CreateIncidentModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        protocols={INITIAL_PROTOCOLS}
-        sectors={INITIAL_SECTORS}
+        protocols={protocols}
+        sectors={sectors}
         units={units}
         onSubmit={handleCreateIncident}
       />

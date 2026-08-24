@@ -13,6 +13,7 @@ import {
   Activity,
   Bell,
   Clock,
+  Sliders,
 } from 'lucide-react';
 
 export function Header() {
@@ -39,6 +40,7 @@ export function Header() {
   const navLinks = [
     { href: '/', label: 'Centro de Despacho', icon: Radio },
     { href: '/responder', label: 'Móvil Respondedor', icon: Smartphone },
+    { href: '/config', label: 'Mi Institución & Flota', icon: Sliders },
     { href: '/devices', label: 'Dispositivos', icon: SmartphoneNfc },
     { href: '/audit', label: 'Auditoría', icon: History },
   ];
